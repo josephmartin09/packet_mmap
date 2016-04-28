@@ -24,6 +24,10 @@
 #include <linux/if_ether.h>
 #include <linux/ip.h>
 
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+
 #ifndef likely
 # define likely(x)		__builtin_expect(!!(x), 1)
 #endif
@@ -103,6 +107,8 @@ static int setup_socket(struct ring *ring, char *netdev)
 	}
 
 	// Create an IO Vector for each block in the ring.
+	// The trick here is to figure out how to offset the iov's to only write
+	// the v49 Info
 	ring->rd = malloc(ring->req.tp_block_nr * sizeof(*ring->rd));
 	assert(ring->rd);
 	for (i = 0; i < ring->req.tp_block_nr; ++i) {
@@ -164,7 +170,8 @@ static void display(struct tpacket3_hdr *ppd)
 }
 
 /* Walk block:  Iterates over every packet within this block */
-static void walk_block(struct block_desc *pbd, const int block_num)
+static void walk_block(struct block_desc *pbd, const int block_num,
+	struct iovec *rd, int out_fd)
 {
 
 	// Init a packet header pointer, and find out how many packets are in this
@@ -180,7 +187,7 @@ static void walk_block(struct block_desc *pbd, const int block_num)
 
 		// tally bytes, print out header info using display()
 		bytes += ppd->tp_snaplen;
-		display(ppd);
+		//display(ppd);
 
 		// Go to the next packet.
 		ppd = (struct tpacket3_hdr *) ((uint8_t *) ppd +
@@ -189,6 +196,8 @@ static void walk_block(struct block_desc *pbd, const int block_num)
 
 	packets_total += num_pkts;
 	bytes_total += bytes;
+
+	//int amt = writev(out_fd, rd, 1);
 }
 
 /*
@@ -213,13 +222,14 @@ static void teardown_socket(struct ring *ring, int fd)
 
 int main(int argc, char **argp)
 {
-	int fd, err;
+	int fd, err, out_fd;
 	socklen_t len;
 	struct ring ring;
 	struct pollfd pfd;
 	unsigned int block_num = 0, blocks = 64;
 	struct block_desc *pbd;
 	struct tpacket_stats_v3 stats;
+	struct iovec* rd;
 
 	if (argc != 2) {
 		fprintf(stderr, "Usage: %s INTERFACE\n", argp[0]);
@@ -241,11 +251,15 @@ int main(int argc, char **argp)
 	pfd.events = POLLIN | POLLERR;
 	pfd.revents = 0;
 
+	// Setup an output file
+	out_fd = open("/data/1/derp1", O_CREAT | O_WRONLY | O_TRUNC, 0644);
+
 	// While not interrupted...
 	while (likely(!sigint)) {
 
 		// Grab the io vector, casting buffer as block_descriptor
 		pbd = (struct block_desc *) ring.rd[block_num].iov_base;
+		rd = (struct iovec *) ring.rd;
 
 		// Can we read this block?
 		if ((pbd->h1.block_status & TP_STATUS_USER) == 0) {
@@ -257,7 +271,7 @@ int main(int argc, char **argp)
 		}
 
 		// Do something with the block
-		walk_block(pbd, block_num);
+		walk_block(pbd, block_num, rd, out_fd);
 
 		// Release the block
 		flush_block(pbd);
