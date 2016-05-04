@@ -107,7 +107,7 @@ static int setup_socket(struct ring *ring, char *netdev)
 	}
 
 	// Create an IO Vector for each block in the ring.
-	// The trick here is to figure out how to offset the iov's to only write
+	// The trick here is to figure out how to offset the iovs to only write
 	// the v49 Info
 	ring->rd = malloc(ring->req.tp_block_nr * sizeof(*ring->rd));
 	assert(ring->rd);
@@ -197,7 +197,7 @@ static void walk_block(struct block_desc *pbd, const int block_num,
 	packets_total += num_pkts;
 	bytes_total += bytes;
 
-	//int amt = writev(out_fd, rd, 1);
+	int amt = writev(out_fd, rd, 1);
 }
 
 /*
@@ -252,7 +252,7 @@ int main(int argc, char **argp)
 	pfd.revents = 0;
 
 	// Setup an output file
-	out_fd = open("/data/1/derp1", O_CREAT | O_WRONLY | O_TRUNC, 0644);
+	out_fd = open("/data/1/test_file", O_CREAT | O_WRONLY | O_TRUNC, 0644);
 
 	// While not interrupted...
 	while (likely(!sigint)) {
@@ -279,7 +279,7 @@ int main(int argc, char **argp)
 	}
 
 	// After done listening, print status about what happened.
-	// Note, pretty cool that PACKET_STATISTICS has a SOL_PACKET option...
+	// Note, pretty cool that PACKET_STATISTICS is a SOL_PACKET option...
 	len = sizeof(stats);
 	err = getsockopt(fd, SOL_PACKET, PACKET_STATISTICS, &stats, &len);
 	if (err < 0) {
