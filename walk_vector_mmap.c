@@ -46,6 +46,17 @@ struct ring {
 	struct tpacket_req3 req;
 };
 
+
+int data_1_stream_0;
+int data_1_stream_1;
+int data_2_stream_2;
+int data_2_stream_3;
+
+struct iovec * stream_vec0;
+struct iovec * stream_vec1;
+struct iovec * stream_vec2;
+struct iovec * stream_vec3;
+
 static unsigned long packets_total = 0, bytes_total = 0;
 static sig_atomic_t sigint = 0;
 
@@ -61,7 +72,7 @@ static void sighandler(int num)
 */
 static int setup_socket(struct ring *ring, char *netdev)
 {
-	int err, i, fd, v = TPACKET_V3;
+	int err, fd, v = TPACKET_V3;
 	struct sockaddr_ll ll;
 	unsigned int blocksiz = 1 << 22, framesiz = 1 << 11;
 	unsigned int blocknum = 64;
@@ -103,16 +114,6 @@ static int setup_socket(struct ring *ring, char *netdev)
 	if (ring->map == MAP_FAILED) {
 		perror("mmap");
 		exit(1);
-	}
-
-	// Create an IO Vector for each block in the ring.
-	// The trick here is to figure out how to offset the iovs to only write
-	// the v49 Info
-	ring->rd = malloc(ring->req.tp_block_nr * sizeof(*ring->rd));
-	assert(ring->rd);
-	for (i = 0; i < ring->req.tp_block_nr; ++i) {
-		ring->rd[i].iov_base = ring->map + (i * ring->req.tp_block_size);
-		ring->rd[i].iov_len = ring->req.tp_block_size;
 	}
 
 	// Bind the socket for listening
@@ -169,8 +170,7 @@ static void display(struct tpacket3_hdr *ppd)
 }
 
 /* Walk block:  Iterates over every packet within this block */
-static void walk_block(struct block_desc *pbd, const int block_num,
-	struct iovec *rd, int out_fd)
+static void walk_block(struct block_desc *pbd)
 {
 
 	// Init a packet header pointer, and find out how many packets are in this
@@ -186,7 +186,7 @@ static void walk_block(struct block_desc *pbd, const int block_num,
 
 		// tally bytes, print out header info using display()
 		bytes += ppd->tp_snaplen;
-		//display(ppd);
+		display(ppd);
 
 		// Go to the next packet.
 		ppd = (struct tpacket3_hdr *) ((uint8_t *) ppd +
@@ -196,7 +196,62 @@ static void walk_block(struct block_desc *pbd, const int block_num,
 	packets_total += num_pkts;
 	bytes_total += bytes;
 
-	int amt = writev(out_fd, rd, 1);
+}
+
+static void record_block(struct block_desc *pbd) {
+
+	// Init a packet header pointer, and find out how many packets are in this
+	// block
+	int num_pkts = pbd->h1.num_pkts, i;
+	unsigned long bytes = 0;
+	struct tpacket3_hdr *ppd;
+
+	// Need an IO Vec for each packet
+	unsigned int iovec0_cnt = 0;
+	unsigned int iovec1_cnt = 0;
+	unsigned int iovec2_cnt = 0;
+	unsigned int iovec3_cnt = 0;
+
+	// Load first packet (header is at the front of each packet)
+	ppd = (struct tpacket3_hdr *) ((uint8_t *) pbd + pbd->h1.offset_to_first_pkt);
+	for (i = 0; i < num_pkts; ++i) {
+
+
+		// tally bytes, print out header info using display()
+		bytes += ppd->tp_snaplen;
+
+		// Does this hash belong to eth2 stream 1 ?
+		if (ppd->hv1.tp_rxhash == 0x1be14167) {
+			stream_vec0[iovec0_cnt].iov_base = ppd + 42;
+			stream_vec0[iovec0_cnt].iov_len = ppd->tp_snaplen - 42;
+			iovec0_cnt++;
+		} else if (ppd->hv1.tp_rxhash == 0x55e950a1) {
+			stream_vec1[iovec1_cnt].iov_base = ppd + 42;
+			stream_vec1[iovec1_cnt].iov_len = ppd->tp_snaplen - 42;
+			iovec1_cnt++;
+		} else if (ppd->hv1.tp_rxhash == 0x9520dfb2) {
+			stream_vec2[iovec2_cnt].iov_base = ppd + 42;
+			stream_vec2[iovec2_cnt].iov_len = ppd->tp_snaplen - 42;
+			iovec2_cnt++;
+		} else if (ppd->hv1.tp_rxhash == 0x56782eac) {
+			stream_vec3[iovec3_cnt].iov_base = ppd + 42;
+			stream_vec3[iovec3_cnt].iov_len = ppd->tp_snaplen - 42;
+			iovec3_cnt++;
+		}
+
+		// Go to the next packet.
+		ppd = (struct tpacket3_hdr *) ((uint8_t *) ppd +
+					       ppd->tp_next_offset);
+	}
+
+	int amt0 = writev(data_1_stream_0, stream_vec0, iovec0_cnt);
+	int amt1 = writev(data_1_stream_1, stream_vec1, iovec1_cnt);
+	int amt2 = writev(data_2_stream_2, stream_vec2, iovec2_cnt);
+	int amt3 = writev(data_2_stream_3, stream_vec3, iovec3_cnt);
+
+	packets_total += num_pkts;
+	bytes_total += bytes;
+
 }
 
 /*
@@ -215,20 +270,19 @@ static void flush_block(struct block_desc *pbd)
 static void teardown_socket(struct ring *ring, int fd)
 {
 	munmap(ring->map, ring->req.tp_block_size * ring->req.tp_block_nr);
-	free(ring->rd);
 	close(fd);
 }
 
 int main(int argc, char **argp)
 {
-	int fd, err, out_fd;
+	int fd, err;
 	socklen_t len;
+	unsigned int block_num_bytes = 0;
 	struct ring ring;
 	struct pollfd pfd;
 	unsigned int block_num = 0, blocks = 64;
 	struct block_desc *pbd;
 	struct tpacket_stats_v3 stats;
-	struct iovec* rd;
 
 	if (argc != 2) {
 		fprintf(stderr, "Usage: %s INTERFACE\n", argp[0]);
@@ -250,15 +304,23 @@ int main(int argc, char **argp)
 	pfd.events = POLLIN | POLLERR;
 	pfd.revents = 0;
 
-	// Setup an output file
-	out_fd = open("/data/1/test_file", O_CREAT | O_WRONLY | O_TRUNC, 0644);
+	// Open the recording file
+	data_1_stream_0 = open("/data/1/stream0", O_CREAT | O_WRONLY | O_TRUNC, 0644);
+	data_1_stream_1 = open("/data/1/stream1", O_CREAT | O_WRONLY | O_TRUNC, 0644);
+	data_2_stream_2 = open("/data/2/stream2", O_CREAT | O_WRONLY | O_TRUNC, 0644);
+	data_2_stream_3 = open("/data/2/stream3", O_CREAT | O_WRONLY | O_TRUNC, 0644);
+
+	// Allocate Packet Buffers (over allocate in this case.)
+	stream_vec0 = malloc(sizeof(struct iovec) * 1100);
+	stream_vec1 = malloc(sizeof(struct iovec) * 1100);
+	stream_vec2 = malloc(sizeof(struct iovec) * 1100);
+	stream_vec3 = malloc(sizeof(struct iovec) * 1100);
 
 	// While not interrupted...
 	while (likely(!sigint)) {
 
 		// Grab the io vector, casting buffer as block_descriptor
-		pbd = (struct block_desc *) ring.rd[block_num].iov_base;
-		rd = (struct iovec *) ring.rd;
+		pbd = (struct block_desc *)((uint8_t *) ring.map + block_num_bytes );
 
 		// Can we read this block?
 		if ((pbd->h1.block_status & TP_STATUS_USER) == 0) {
@@ -270,11 +332,16 @@ int main(int argc, char **argp)
 		}
 
 		// Do something with the block
-		walk_block(pbd, block_num, rd, out_fd);
+		//walk_block(pbd);
+
+		// Record the block
+		record_block(pbd);
 
 		// Release the block
 		flush_block(pbd);
 		block_num = (block_num + 1) % blocks;
+		block_num_bytes = block_num * ring.req.tp_block_size;
+
 	}
 
 	// After done listening, print status about what happened.
@@ -285,6 +352,12 @@ int main(int argc, char **argp)
 		perror("getsockopt");
 		exit(1);
 	}
+
+	// Free Packet Buffers
+	free(stream_vec0);
+	free(stream_vec1);
+	free(stream_vec2);
+	free(stream_vec3);
 
 	fflush(stdout);
 	printf("\nReceived %u packets, %lu bytes, %u dropped, freeze_q_cnt: %u\n",
