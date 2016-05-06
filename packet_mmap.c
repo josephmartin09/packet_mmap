@@ -23,6 +23,7 @@
 #include <linux/if_packet.h>
 #include <linux/if_ether.h>
 #include <linux/ip.h>
+#include <linux/udp.h>
 
 #include <sys/types.h>
 #include <sys/stat.h>

@@ -23,6 +23,7 @@
 #include <linux/if_packet.h>
 #include <linux/if_ether.h>
 #include <linux/ip.h>
+#include <linux/udp.h>
 
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -206,6 +207,12 @@ static void record_block(struct block_desc *pbd) {
 	unsigned long bytes = 0;
 	struct tpacket3_hdr *ppd;
 
+	// Will point to eth and ip header for each packet in the block
+	// struct ethhdr *eth;
+	// struct iphdr *ip;
+	// struct udphdr *udp;
+	// uint8_t *data_payload;
+
 	// Need an IO Vec for each packet
 	unsigned int iovec0_cnt = 0;
 	unsigned int iovec1_cnt = 0;
@@ -216,25 +223,27 @@ static void record_block(struct block_desc *pbd) {
 	ppd = (struct tpacket3_hdr *) ((uint8_t *) pbd + pbd->h1.offset_to_first_pkt);
 	for (i = 0; i < num_pkts; ++i) {
 
-
-		// tally bytes, print out header info using display()
-		bytes += ppd->tp_snaplen;
+		// data_payload - ppd is 124 bytes
+		// eth = (struct ethhdr *) ((uint8_t *) ppd + ppd->tp_mac);
+		// ip = (struct iphdr *) ((uint8_t *) eth + ETH_HLEN);
+		// udp = (struct udphdr *)((uint8_t *) ip + sizeof(struct iphdr));
+		// data_payload = (uint8_t *)((uint8_t *) udp + sizeof(struct udphdr));
 
 		// Does this hash belong to eth2 stream 1 ?
 		if (ppd->hv1.tp_rxhash == 0x1be14167) {
-			stream_vec0[iovec0_cnt].iov_base = ppd + 42;
+			stream_vec0[iovec0_cnt].iov_base = ppd + 124;
 			stream_vec0[iovec0_cnt].iov_len = ppd->tp_snaplen - 42;
 			iovec0_cnt++;
 		} else if (ppd->hv1.tp_rxhash == 0x55e950a1) {
-			stream_vec1[iovec1_cnt].iov_base = ppd + 42;
+			stream_vec1[iovec1_cnt].iov_base = ppd + 124;
 			stream_vec1[iovec1_cnt].iov_len = ppd->tp_snaplen - 42;
 			iovec1_cnt++;
 		} else if (ppd->hv1.tp_rxhash == 0x9520dfb2) {
-			stream_vec2[iovec2_cnt].iov_base = ppd + 42;
+			stream_vec2[iovec2_cnt].iov_base = ppd + 124;
 			stream_vec2[iovec2_cnt].iov_len = ppd->tp_snaplen - 42;
 			iovec2_cnt++;
 		} else if (ppd->hv1.tp_rxhash == 0x56782eac) {
-			stream_vec3[iovec3_cnt].iov_base = ppd + 42;
+			stream_vec3[iovec3_cnt].iov_base = ppd + 124;
 			stream_vec3[iovec3_cnt].iov_len = ppd->tp_snaplen - 42;
 			iovec3_cnt++;
 		}
@@ -249,6 +258,9 @@ static void record_block(struct block_desc *pbd) {
 	int amt2 = writev(data_2_stream_2, stream_vec2, iovec2_cnt);
 	int amt3 = writev(data_2_stream_3, stream_vec3, iovec3_cnt);
 
+
+	// tally bytes and packets
+	bytes += ppd->tp_snaplen;
 	packets_total += num_pkts;
 	bytes_total += bytes;
 
