@@ -230,20 +230,20 @@ static void record_block(struct block_desc *pbd) {
 		// data_payload = (uint8_t *)((uint8_t *) udp + sizeof(struct udphdr));
 
 		// Does this hash belong to eth2 stream 1 ?
-		if (ppd->hv1.tp_rxhash == 0x1be14167) {
-			stream_vec0[iovec0_cnt].iov_base = ppd + 124;
+		if (ppd->hv1.tp_rxhash == 0x46d79653) {
+			stream_vec0[iovec0_cnt].iov_base = ((uint8_t *) ppd + 124);
 			stream_vec0[iovec0_cnt].iov_len = ppd->tp_snaplen - 42;
 			iovec0_cnt++;
-		} else if (ppd->hv1.tp_rxhash == 0x55e950a1) {
-			stream_vec1[iovec1_cnt].iov_base = ppd + 124;
+		} else if (ppd->hv1.tp_rxhash == 0xba0603d) {
+			stream_vec1[iovec1_cnt].iov_base = ((uint8_t *) ppd + 124);
 			stream_vec1[iovec1_cnt].iov_len = ppd->tp_snaplen - 42;
 			iovec1_cnt++;
-		} else if (ppd->hv1.tp_rxhash == 0x9520dfb2) {
-			stream_vec2[iovec2_cnt].iov_base = ppd + 124;
+		} else if (ppd->hv1.tp_rxhash == 0x5c0106ea) {
+			stream_vec2[iovec2_cnt].iov_base = ((uint8_t *) ppd + 124);
 			stream_vec2[iovec2_cnt].iov_len = ppd->tp_snaplen - 42;
 			iovec2_cnt++;
-		} else if (ppd->hv1.tp_rxhash == 0x56782eac) {
-			stream_vec3[iovec3_cnt].iov_base = ppd + 124;
+		} else if (ppd->hv1.tp_rxhash == 0x567363f4) {
+			stream_vec3[iovec3_cnt].iov_base = ((uint8_t *) ppd + 124);
 			stream_vec3[iovec3_cnt].iov_len = ppd->tp_snaplen - 42;
 			iovec3_cnt++;
 		}
@@ -257,7 +257,6 @@ static void record_block(struct block_desc *pbd) {
 	int amt1 = writev(data_1_stream_1, stream_vec1, iovec1_cnt);
 	int amt2 = writev(data_2_stream_2, stream_vec2, iovec2_cnt);
 	int amt3 = writev(data_2_stream_3, stream_vec3, iovec3_cnt);
-
 
 	// tally bytes and packets
 	bytes += ppd->tp_snaplen;
